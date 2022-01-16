@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en" xmlns="">
+<head>
+    <meta charset="UTF-8">
+    <title>Index</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div id="gold" class="gold">
+    <canvas id="gold-chart" width="400" height="400"></canvas>
+</div>
+
+<div id="items">
+
+</div>
+
+<div id="test" style="visibility: hidden">
+    <div class="img-container">
+        <img src="eternals3.webp" >
+        <div class="background-container"></div>
+        <img src="https://ddragon.leagueoflegends.com/cdn/img/champion/tiles/Ahri_0.jpg" class="rounded champion-img">
+        <div class="item-container">
+            <!--<img src="https://ddragon.leagueoflegends.com/cdn/12.1.1/img/item/1001.png" class="item">-->
+        </div>
+    </div>
+</div>
+
+
+
+</body>
+
+<script src="js/bootstrap.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.29.1/moment.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@2.9.4/dist/Chart.min.js"></script>
+<script>
+
+    function fancyTimeFormat(duration)
+    {
+        // Hours, minutes and seconds
+        var hrs = ~~(duration / 3600);
+        var mins = ~~((duration % 3600) / 60);
+        var secs = ~~duration % 60;
+
+        // Output like "1:01" or "4:03:59" or "123:03:59"
+        var ret = "";
+
+        if (hrs > 0) {
+            ret += "" + hrs + ":" + (mins < 10 ? "0" : "");
+        }
+
+        ret += "" + mins + ":" + (secs < 10 ? "0" : "");
+        ret += "" + secs;
+        return ret;
+    }
+
+    let playerInfo = [];
+    var myChart;
+    var start_time = 0;
+    async function main() {
+        var ctx = document.getElementById("gold-chart").getContext("2d");
+        console.log(ctx);
+        myChart = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: 'Gold difference',
+                    data: [],
+                    backgroundColor: [
+                    ],
+                    borderColor: 'rgba(0, 0, 0, 1)',
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                legend: {
+                    display: false
+                },
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        beginAtZero: false,
+                        fontColor: "green",
+                        fontSize: "18",
+                    }
+                }
+            }
+        });
+
+
+        let running = false
+        let websock = new WebSocket("ws://localhost:3012");
+        websock.onclose = function () {
+            console.log("On Close !")
+            running = false
+            websock.close()
+            websock = new WebSocket("ws://localhost:3012")
+        }
+        websock.onerror = function () {
+            console.log("On Error !")
+            running = false
+            websock.close()
+            websock = new WebSocket("ws://localhost:3012")
+        }
+
+        websock.onopen = function (event) {
+            console.log("On Open")
+            running = true
+        }
+
+        websock.onmessage = function (message) {
+            let data = JSON.parse(message.data);
+            let message_time = data[0]
+            let message_type = data[1]
+            let message_data = data[2]
+
+            switch (message_type){
+                case "GameStart":{
+                    console.log("Game started !")
+                    start_time = message_time["secs_since_epoch"];
+                    break
+                }
+                case "PlayerInfo": {
+                    console.log("Recv Player info !")
+                    playerInfo = message_data
+                    console.log(playerInfo)
+                    break
+                }
+                case "GoldInformation":{
+                    console.log("Gold Information !")
+
+                    let order_gold = 0;
+                    let chaos_gold = 0;
+                    for (var x in message_data) {
+                        if (message_data[x][1] === "ORDER") {
+                            order_gold += message_data[x][0]
+                        } else {
+                            chaos_gold += message_data[x][0]
+                        }
+                    }
+
+                    let diff = order_gold-chaos_gold;
+                    let time = fancyTimeFormat(message_time["secs_since_epoch"]-start_time);
+                    myChart.data.labels.push(time);
+                    myChart.data.datasets.forEach((dataset) => {
+                        dataset.data.push(diff)
+                        if (diff >= 0){
+                            dataset.backgroundColor.push('rgba(0,0,255,1)')
+                        }else{
+                            dataset.backgroundColor.push('rgba(255,0,0,1)')
+                        }
+                    })
+
+                    myChart.update();
+
+                    break
+                }
+                case "ItemInformation": {
+                    const items = document.getElementById("items");
+                    console.log("Item Information !")
+
+                    for (const summoner_name in message_data) {
+                        let pi = playerInfo.filter(function(element) {
+                            return element["summoner_name"] === summoner_name;
+                        })[0];
+
+                        if (message_data[summoner_name].length === 0){
+                            continue
+                        }
+
+                        let base = document.getElementById("test").cloneNode(true);
+                        base.id = "";
+                        base.style.visibility = "";
+                        let img_container = base.firstElementChild;
+                        img_container.children[2].src = `https://cdn.communitydragon.org/latest/champion/${pi["champion_name"]}/tile/skin/${pi["skin_id"]}`;
+                        img_container.children[2].onerror = function () {
+                            this.onerror=null;
+                            this.src=`https://cdn.communitydragon.org/latest/champion/${pi["champion_name"]}/tile/skin/0`;
+                        }
+
+                        let item_container = img_container.children[3]
+
+
+                        for (const i in message_data[summoner_name]) {
+                            let item = message_data[summoner_name][i]
+                            let img = document.createElement("img");
+                            img.className = "item";
+                            img.src = item["image_url"];
+                            item_container.appendChild(img);
+                        }
+
+                        items.appendChild(base);
+
+                        setTimeout(function (b){
+                            b.remove()
+                        }, 5000, base)
+
+                    }
+
+                    break
+                }
+            }
+        }
+    }
+    main()
+</script>
+</html>
